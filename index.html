@@ -2,7 +2,7 @@
 <html>
 <head>
 <meta charset="utf-8">
-<title>Planilha limpa</title>
+<title>Planilha limpa (robusta)</title>
 <meta name="viewport" content="width=device-width,initial-scale=1">
 <style>
   body{font-family:system-ui,Segoe UI,Arial;background:#0b1220;color:#eef2ff;margin:0;padding:20px;}
@@ -13,6 +13,7 @@
   .small{font-size:13px;color:#cbd5e1}
   .status-em{color:#f6e05e;font-weight:700}
   .status-ok{color:#9ae6b4;font-weight:700}
+  .error{color:#ff9aa2;background:#3b0f12;padding:10px;border-radius:6px}
 </style>
 </head>
 <body>
@@ -23,42 +24,75 @@
   </div>
 
 <script>
-const SHEET_ID = "1avUZODKbGO0MfC2kh-YnuVHjZKUD9R3stnysR5o__JI"; // substitua
-const SHEET_NAME = "PAINEL";      // nome da aba (case sensitive)
-
+const SHEET_ID = "1avUZODKbGO0MfC2kh-YnuVHjZKUD9R3stnysR5o__JI";
+const SHEET_NAME = "PAINEL";
 const GVIZ_URL = `https://docs.google.com/spreadsheets/d/${SHEET_ID}/gviz/tq?tqx=out:json&sheet=${encodeURIComponent(SHEET_NAME)}`;
 
-function parseGvizText(text){
-  // remove wrapper: google.visualization.Query.setResponse(...)
-  const json = JSON.parse(text.replace(/^[^{]*/,"").replace(/\);?\\s*$/,""));
-  return json.table;
+/**
+ * Extrai de forma robusta o JSON do wrapper do gviz.
+ * Procura o primeiro '{' e o último '}' e tenta fazer parse.
+ */
+function parseGvizTextRobusto(text){
+  if (!text || typeof text !== 'string') throw new Error('Resposta vazia do Google.');
+  // Procurar primeiro '{' e último '}' na string
+  const first = text.indexOf('{');
+  const last  = text.lastIndexOf('}');
+  if (first === -1 || last === -1 || last <= first) {
+    throw new Error('Não localizei JSON válido na resposta do Google.');
+  }
+  const jsonText = text.substring(first, last + 1);
+  return JSON.parse(jsonText);
 }
 
 async function load(){
   try{
+    document.getElementById('meta').textContent = `Buscando ${SHEET_NAME}...`;
     const r = await fetch(GVIZ_URL);
     const txt = await r.text();
-    const table = parseGvizText(txt);
+
+    // tentar parse robusto
+    let table;
+    try {
+      const parsed = parseGvizTextRobusto(txt);
+      table = parsed.table;
+    } catch (err) {
+      // mostrar parte da resposta para debug
+      const snippet = txt ? txt.slice(0, 1000) : '';
+      throw new Error('Falha ao interpretar resposta do Google Sheets. Resposta (trecho):\n' + snippet + '\n\nErro: ' + err.message);
+    }
+
+    if (!table) throw new Error('Resposta não contém campo table.');
+
     document.getElementById('meta').textContent = `Aba: ${SHEET_NAME} — ${table.rows.length} linhas`;
     renderTable(table);
-  }catch(e){
-    document.getElementById('meta').textContent = 'Erro ao carregar: ' + e.message;
+
+  } catch (err) {
+    document.getElementById('meta').innerHTML = `<span class="error">Erro ao carregar: ${escapeHtml(err.message)}</span>`;
+    console.error(err);
   }
+}
+
+function escapeHtml(str){
+  return String(str).replace(/&/g,'&amp;').replace(/</g,'&lt;').replace(/>/g,'&gt;');
 }
 
 function renderTable(table){
   const cols = table.cols.map(c => c.label || c.id || '');
-  const rows = table.rows.map(r => r.c.map(cell => cell && ('v' in cell ? cell.v : '') ));
+  const rows = table.rows.map(r => (r.c || []).map(cell => (cell && ('v' in cell) ? cell.v : '')));
   const container = document.getElementById('table-wrap');
-  let html = '<table><thead><tr>' + cols.map(c => `<th>${c}</th>`).join('') + '</tr></thead><tbody>';
+  if (!rows.length) {
+    container.innerHTML = '<div class="small">Nenhuma linha encontrada.</div>';
+    return;
+  }
+  let html = '<table><thead><tr>' + cols.map(c => `<th>${escapeHtml(c)}</th>`).join('') + '</tr></thead><tbody>';
   rows.forEach(r => {
     html += '<tr>' + r.map((v,i) => {
-      const head = cols[i] ? cols[i].toLowerCase() : '';
-      if(head.includes('status')){
+      const head = (cols[i]||'').toLowerCase();
+      if (head.includes('status')) {
         const cls = (v==='Em andamento') ? 'status-em' : (v==='Concluído') ? 'status-ok' : '';
-        return `<td class="${cls}">${v||''}</td>`;
+        return `<td class="${cls}">${escapeHtml(v||'')}</td>`;
       }
-      return `<td>${v||''}</td>`;
+      return `<td>${escapeHtml(v||'')}</td>`;
     }).join('') + '</tr>';
   });
   html += '</tbody></table>';
@@ -66,6 +100,7 @@ function renderTable(table){
 }
 
 load();
+setInterval(load, 60000); // atualiza a cada 60s
 </script>
 </body>
 </html>
