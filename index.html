@@ -179,12 +179,94 @@
         classe = "status-concluido";
 
       html += `<tr class="${classe}">`;
+
+      
            
-      r.forEach(c => html += `<td>${c}</td>`);
-      html += "</tr>";
-    });
+     // helper: escape HTML
+function escapeHtml(str){
+  return String(str ?? "").replace(/&/g,'&amp;').replace(/</g,'&lt;').replace(/>/g,'&gt;');
+}
+
+// formata valores vindos do gviz para formatos amigáveis BR
+function formatCell(value) {
+  if (value === null || value === undefined) return "";
+
+  // já é um Date object (pouco provável no gviz, mas seguro)
+  if (value instanceof Date && !isNaN(value)) {
+    return value.toLocaleDateString('pt-BR');
+  }
+
+  // se for número (por ex. timestamp), mostrar como está
+  if (typeof value === 'number') return String(value);
+
+  // se for string, tratar vários formatos
+  if (typeof value === 'string') {
+    const s = value.trim();
+
+    // 1) Date(YYYY,MM,DD,HH,MM,SS...) — extrai números
+    const dateMatch = s.match(/^Date\(\s*(\d+)\s*,\s*(\d+)\s*,\s*(\d+)(?:\s*,\s*(\d+)\s*,\s*(\d+)\s*,\s*(\d+))?/);
+    if (dateMatch) {
+      const ano = Number(dateMatch[1]);
+      const mes = Number(dateMatch[2]) + 1; // months are 0-based in Date(...)
+      const dia = Number(dateMatch[3]);
+      // se veio hora
+      if (dateMatch[4] !== undefined) {
+        const hh = String(dateMatch[4]).padStart(2,'0');
+        const mm = String(dateMatch[5] ?? 0).padStart(2,'0');
+        const ss = String(dateMatch[6] ?? 0).padStart(2,'0');
+        return `${String(dia).padStart(2,'0')}/${String(mes).padStart(2,'0')}/${ano} ${hh}:${mm}:${ss}`;
+      }
+      return `${String(dia).padStart(2,'0')}/${String(mes).padStart(2,'0')}/${ano}`;
+    }
+
+    // 2) TimeOfDay(H, M, S) -> converte para HH:MM:SS
+    const timeMatch = s.match(/^TimeOfDay\(\s*(\d+)\s*,\s*(\d+)\s*,\s*(\d+)\s*\)/);
+    if (timeMatch) {
+      const hh = String(timeMatch[1]).padStart(2,'0');
+      const mm = String(timeMatch[2]).padStart(2,'0');
+      const ss = String(timeMatch[3]).padStart(2,'0');
+      return `${hh}:${mm}:${ss}`;
+    }
+
+    // 3) ISO date yyyy-mm-dd or datetime
+    const isoDateMatch = s.match(/^(\d{4})-(\d{2})-(\d{2})(?:[T\s](\d{2}):(\d{2}):?(\d{2})?)?/);
+    if (isoDateMatch) {
+      const ano = isoDateMatch[1];
+      const mes = isoDateMatch[2];
+      const dia = isoDateMatch[3];
+      if (isoDateMatch[4] !== undefined) {
+        const hh = String(isoDateMatch[4]).padStart(2,'0');
+        const mm = String(isoDateMatch[5] ?? '00').padStart(2,'0');
+        const ss = String(isoDateMatch[6] ?? '00').padStart(2,'0');
+        return `${dia}/${mes}/${ano} ${hh}:${mm}:${ss}`;
+      }
+      return `${dia}/${mes}/${ano}`;
+    }
+
+    // 4) se for string normal, retornar como está (trim)
+    return s;
+  }
+
+  // 5) caso seja objeto (por ex. gviz pode retornar objetos complexos)
+  if (typeof value === 'object') {
+    // tente extrair field 'v' ou 'f' se existir
+    if ('v' in value) return formatCell(value.v);
+    if ('f' in value) return formatCell(value.f);
+    // fallback: stringify
+    try { return JSON.stringify(value); } catch(e) { return String(value); }
+  }
+
+  // fallback geral
+  return String(value);
+}
+
+
     
-    html += "</tbody></table>";
+ r.forEach(cellValue => {
+  const valorFormatado = escapeHtml(formatCell(cellValue));
+  html += `<td>${valorFormatado}</td>`;
+});
+
 
 
     div.innerHTML = html;
